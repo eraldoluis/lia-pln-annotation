@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import json
 from random import randint
 from flask import Flask, url_for, render_template, request, session, redirect
 from flask import flash
@@ -93,31 +94,15 @@ def MentionGetter():
     # Get the current tweet.
     mentionIndex = session.storedSession["mentionIndex"]
     tweet = session.results[mentionIndex]["_source"]["tweet"]
-    tweet_text = "https://twitter.com/%s/status/%s" % (tweet["user"]["screen_name"], tweet["id_str"])
-    r = requests.get(("https://publish.twitter.com/oembed?url=" + tweet_text)).content
-    re = r.decode('utf-8').replace("\\", "")
-    retweet = ""
-
-    if re.find('Sorry, you are not authorized to see this status.') != -1:
-        finaldois = tweet["text"] + '\n'
-    else:
-        if tweet["text"][0:2] == "RT":
-            retweet = "Um retweet de @%s do tweet:\n" % tweet["user"]["screen_name"]
-        ree = re.replace("u003C", "<")
-        reee = ree.replace("u003E", ">")
-        reeee = reee.replace("blockquote>n<script", "blockquote><script")
-        T = reeee.rsplit("\"html\":\"", 1)
-        try:
-            indice = T[1].index("script>\"")
-        except:
-            session.mentionIndex = randint(0, 4999)
-            return redirect('/')
-
-        final = T[1][:indice + 7]
-        indicede = final.index("><p lang")
-        finaldois = final[:indicede] + " \"data-lang=\"en\"" + final[indicede:]
-
-    return render_template('MentionDisplay.html', rt=retweet, block=finaldois, context=u"à série Supernatural")
+    tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
+    oEmbedUrl = 'https://publish.twitter.com/oembed?url=%s' % tweetUrl
+    tweetJson = json.loads(requests.get(oEmbedUrl).content)
+    if 'html' not in tweetJson:
+        # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
+        session.getNextTweet()
+        return redirect('/')
+    tweetHtml = tweetJson['html']
+    return render_template('MentionDisplay.html', rt='', block=tweetHtml, context=u"à série Supernatural")
 
 
 @app.route('/MentionClassificated', methods=['GET', 'POST'])
