@@ -102,7 +102,7 @@ def MentionGetter():
         session.getNextTweet()
         return redirect('/')
     tweetHtml = tweetJson['html']
-    return render_template('MentionDisplay.html', rt='', block=tweetHtml, context=u"à série Supernatural")
+    return render_template('MentionDisplay.html', tweet=tweetHtml, context=u"à série Supernatural")
 
 
 @app.route('/MentionClassificated', methods=['GET', 'POST'])
