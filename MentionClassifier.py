@@ -96,7 +96,12 @@ def MentionGetter():
     tweet = session.results[mentionIndex]["_source"]["tweet"]
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
     oEmbedUrl = 'https://publish.twitter.com/oembed?url=%s' % tweetUrl
-    tweetJson = json.loads(requests.get(oEmbedUrl).content)
+    oEmbedResp = requests.get(oEmbedUrl)
+    if oEmbedResp.status_code != 200:
+        # Não retornou com sucesso (por alguma razão que desconheço).
+        session.getNextTweet()
+        return redirect('/')
+    tweetJson = json.loads(oEmbedResp.content)
     if 'html' not in tweetJson:
         # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
         session.getNextTweet()
