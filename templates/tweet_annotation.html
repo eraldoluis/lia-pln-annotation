@@ -1,6 +1,6 @@
 <!doctype html>
 <title>Mention Classifier Display</title>
-<FORM ACTION="MentionClassificated" METHOD="post">
+<FORM ACTION="annotate" METHOD="post">
 
     <head>
         <meta charset="UTF-8">
@@ -11,7 +11,7 @@
     {% if messages %}
     <ul class=flashes>
         {% for message in messages %}
-        <li>{{ message }}</li>
+        <li>{{message}}</li>
         {% endfor %}
     </ul>
     {% endif %}
@@ -23,6 +23,8 @@
 
     <INPUT TYPE="radio" NAME="answer" value="yes">Sim<BR><BR>
     <INPUT TYPE="radio" NAME="answer" value="no">Não<BR><BR>
+    <INPUT TYPE="hidden" name="userId" value="{{userId}}">
+    <INPUT TYPE="hidden" name="tweetId" value="{{tweetId}}">
     <INPUT TYPE="submit" name="submit" value="Enviar resposta ou Pular">
 
     {% endblock %}
