@@ -34,6 +34,10 @@ def getAnnotationManager():
     The annotation manager object manages which tweets are available for annotation and return one tweet for each
     user that logs in the system. It is also responsible for saving annotations to ES.
 
+    This object is bounded to the web app (app context). This means that there is only one object per application
+    and it is responsible for managing the lists of tweets for all users. Thus, it needs to deal with race conditions,
+    caused by the request threads.
+
     :return: the annotation manager object.
     """
     with app.app_context():
