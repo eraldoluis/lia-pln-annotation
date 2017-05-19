@@ -2,6 +2,47 @@
 <title>Mention Classifier Display</title>
 <FORM ACTION="annotate" METHOD="post">
 
+<style media="screen" type="text/css">
+.wrap {
+  position: relative;
+}
+.popup {
+  display: none;
+  position: absolute;
+  background: #ffffff;
+  opacity: 0.85;
+  border-radius: 5px;
+  width: 500px;
+  height: 382px;
+  -webkit-border-radius: 10px;
+  -moz-border-radius: 10px;
+  margin-top: 170px;
+  margin-left: 580px;
+  color: #000;
+  z-index: 1;
+}
+
+.pic {
+  z-index: 0;
+}
+.pic:hover + .popup {
+  display: block;
+}
+</style>
+
+<div class="wrap">
+  <img class="pic" src="http://www.digikey.com/web%20export/common/mkt/en/help.png" alt="Help" style="position:absolute; TOP:170px; LEFT:550px; WIDTH:16px; HEIGHT:16px">
+  <div class="popup">
+    <h5>
+      Sobre os tweets:
+    </h5>
+    <h5 class="fruitDescription">
+       Os tweets em branco são os principais a serem analisados,enquanto os azuis(se houver) são tweets sendo respondidos pelos principais
+    </h5>
+  </div>
+</div>
+
+
     <head>
         <meta charset="UTF-8">
     </head>
