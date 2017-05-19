@@ -69,23 +69,28 @@ class AnnotationManager:
         _tweets = _es.search(index="ctrls_001", doc_type="twitter", body={
             "size": 10,
             "query": {
-                "bool": {
-                    "must": [
-                        {
-                            "query_string": {
-                                "query": "tweet.text:sam OR tweet.text:dean",
-                                "analyze_wildcard": "true"
-                            }
-                        },
-                        {
-                            "range": {
-                                "tweet.created_at": {
-                                    "from": "2017-03-01T13:00-04:00",
-                                    "to": "2017-03-20T14:00-04:00"
+                "function_score": {
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {
+                                    "term": {
+                                        "start": "2017-02-20T16:33:25.093458-04:00"
+                                    }
+                                },
+                                {
+                                    "range": {
+                                        "tweet.created_at": {
+                                            "gte": "2017-02-20",
+                                            "lt": "2017-03-21"
+                                        }
+                                    }
                                 }
-                            }
+                            ]
                         }
-                    ]
+                    },
+                    "random_score": {},
+                    "boost_mode": "replace"
                 }
             }
         })["hits"]["hits"]
@@ -189,7 +194,7 @@ def index():
     # Get the oEmbed HTML for the current tweet of the logged user.
     tweet = annManager.getCurrentTweet(session.userId)
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
-    oEmbedUrl = 'https://publish.twitter.com/oembed?url=%s' % tweetUrl
+    oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=f&url=%s' % tweetUrl
     oEmbedResp = requests.get(oEmbedUrl)
 
     if oEmbedResp.status_code != 200:
