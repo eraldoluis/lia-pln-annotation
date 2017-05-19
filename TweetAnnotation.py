@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 import json
+from random import randint
 from random import randrange
 import flask
 from flask import Flask, render_template, request, session, redirect, flash, current_app
@@ -66,28 +67,53 @@ class AnnotationManager:
         :param _es: the ES client to be used by this manager.
         """
         self.es = _es
-        _tweets = _es.search(index="ctrls_001", doc_type="twitter", body={
-            "size": 10,
-            "query": {
-                "bool": {
-                    "must": [
-                        {
-                            "query_string": {
-                                "query": "tweet.text:sam OR tweet.text:dean",
-                                "analyze_wildcard": "true"
-                            }
-                        },
-                        {
-                            "range": {
-                                "tweet.created_at": {
-                                    "from": "2017-03-01T13:00-04:00",
-                                    "to": "2017-03-20T14:00-04:00"
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
+	if randint(0,2) == 0:
+            _tweets = _es.search(index="ctrls_001", doc_type="twitter", body={
+	        "size": 10,
+	        "query": {
+	            "bool": {
+	                "must": [
+	                    {
+	                        "query_string": {
+	                            "query": "tweet.text:sam OR tweet.text:dean",
+	                            "analyze_wildcard": "true"
+	                        }
+	                     },
+	                    {
+	                        "range": {
+	                            "tweet.created_at": {
+	                                "from": "2017-03-01T13:00-04:00",
+	                                "to": "2017-03-20T14:00-04:00"
+		                        }
+		                    }
+		                }
+		            ]
+		        }
+		    }
+		    })["hits"]["hits"]
+	else:
+		_tweets = _es.search(index="ctrls_001", doc_type="twitter", body={
+		    "size": 10,
+		    "query": {
+		        "bool": {
+		            "must": [
+		                {
+		                    "query_string": {
+		                        "query": "tweet.text:Bahia OR tweet.text:São Paulo OR tweet.text:Santos",
+		                        "analyze_wildcard": "true"
+		                    }
+		                },
+		                {
+		                    "range": {
+		                        "tweet.created_at": {
+		                            "from": "2017-03-01T13:00-04:00",
+		                            "to": "2017-03-20T14:00-04:00"
+		                        }
+		                    }
+		                }
+		            ]
+		        }
+		    }
         })["hits"]["hits"]
         self.tweets = [t["_source"]["tweet"] for t in _tweets]
         self.mapUserTweet = {}
@@ -172,8 +198,6 @@ class ElasticSearchSessionInterface(SessionInterface):
             response.delete_cookie(app.session_cookie_name, domain=domain)
             return
 
-        # TODO: Jonatas, você tem certeza que é necessário apagar o cookie antes de setá-lo?
-        response.delete_cookie(app.session_cookie_name, domain=domain)
         expires = time.time() + 3650 * 24 * 3600
         response.set_cookie(app.session_cookie_name, session.userId,
                             expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
@@ -208,9 +232,13 @@ def index():
     # Get the HTML content.
     tweetHtml = tweetJson['html']
 
+    if(tweet['text'].find('sam') != -1 and tweet['text'].find('dean') != -1):
+	context = "a serie Supernatural"
+    else:
+        context = "a times de futebol brasileiro"
     # Render the annotation page.
     return render_template('tweet_annotation.html', userId=session.userId, tweetId=tweet['id_str'],
-                           tweet=tweetHtml, context=u"à série Supernatural")
+                           tweet=tweetHtml, context=context)
 
 
 @app.route('/annotate', methods=['GET', 'POST'])
