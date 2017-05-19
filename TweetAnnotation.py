@@ -194,7 +194,7 @@ def index():
     # Get the oEmbed HTML for the current tweet of the logged user.
     tweet = annManager.getCurrentTweet(session.userId)
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
-    oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=f&url=%s' % tweetUrl
+    oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
     oEmbedResp = requests.get(oEmbedUrl)
 
     if oEmbedResp.status_code != 200:
