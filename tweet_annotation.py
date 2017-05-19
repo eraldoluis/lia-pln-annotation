@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import json
-from random import randrange
-import flask
-from flask import Flask, render_template, request, session, redirect, flash, current_app
-from flask.sessions import SessionInterface, SessionMixin
-from werkzeug.datastructures import CallbackDict
-from werkzeug.local import LocalProxy
-from elasticsearch import Elasticsearch
 import requests
-import time
-from uuid import uuid4
+
+import flask
+from elasticsearch import Elasticsearch
+from flask import Flask, render_template, request, session, redirect, flash, current_app
+from werkzeug.local import LocalProxy
+
+from annotation_manager import AnnotationManager
+from session_manager import ElasticSearchSessionInterface
 
 app = Flask(__name__)
 app.secret_key = '\x1c\xfb|o\xcc\r\x96\xc4\xe4\xfe\xaf\xb9\x16b\x96n0+{Nd|+\xd4'
@@ -52,141 +51,6 @@ es = LocalProxy(getElasticSearchClient)
 
 # Proxy variable to the annotation manager object.
 annManager = LocalProxy(getAnnotationManager)
-
-
-class AnnotationManager:
-    """
-    The annotation manager is responsible to keep a list of available tweets to be annotated. It also manages
-    which tweet is associated to each user of the system, and saves the given annotations to ES.
-
-    The annotation manager object is a singleton within the application, i.e., there is only one object that is
-    shared by all requests/users.
-    """
-
-    def __init__(self, _es):
-        """
-        Create the annotation object with the given ES client.
-
-        :param _es: the ES client to be used by this manager.
-        """
-        self.es = _es
-        _tweets = _es.search(index="ctrls_001", doc_type="twitter", body={
-            "size": 10,
-            "query": {
-                "function_score": {
-                    "query": {
-                        "bool": {
-                            "filter": [
-                                {
-                                    "term": {
-                                        "start": "2017-02-20T16:33:25.093458-04:00"
-                                    }
-                                },
-                                {
-                                    "range": {
-                                        "tweet.created_at": {
-                                            "gte": "2017-02-20",
-                                            "lt": "2017-03-21"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "random_score": {},
-                    "boost_mode": "replace"
-                }
-            }
-        })["hits"]["hits"]
-        self.tweets = [t["_source"]["tweet"] for t in _tweets]
-        self.mapUserTweet = {}
-
-    def getCurrentTweet(self, userId):
-        """
-        Return the current tweet associated to the given user (userId).
-
-        :param userId:
-        :return:
-        """
-        tweet = self.mapUserTweet.get(userId)
-        if tweet is None:
-            tweet = self.__nextTweet(userId)
-        return tweet
-
-    def __nextTweet(self, userId):
-        """
-        Choose a new tweet to be annotated by the given user from the list of available tweets.
-
-        :param userId:
-        :return: the new associated tweet.
-        """
-        n = len(self.tweets)
-        i = randrange(n)
-        tweet = self.tweets[i]
-        del self.tweets[i]
-        self.mapUserTweet[userId] = tweet
-        return tweet
-
-    def skipTweet(self, userId):
-        """
-        Skip the current tweet associated with the given user ID and associate a new tweet to this user.
-
-        :param userId:
-        :return: the new associated tweet.
-        """
-        return self.__nextTweet(userId)
-
-    def annotate(self, userId, tweetId, annotation):
-        """
-        Save the given annotation to ES and return a new associated tweet.
-        If the given annotation is None, it is equivalent to skipTweet(userId).
-
-        :param userId:
-        :param tweetId:
-        :param annotation: valid values are 'yes', 'no' and None.
-        :return: a new associated tweet.
-        """
-        # Retrieve user annotations.
-        _doc = es.get(index='test', doc_type='anotadores', id=userId)['_source']
-
-        # Append the given annotation (if any).
-        if annotation in ("yes", "no"):
-            # Append the given annotation.
-            annotations = _doc.setdefault('annotations', [])
-            annotations.append({'tweet_id_str': tweetId, 'annotation': annotation})
-            # Update Elasticsearch.
-            es.update(index="test", doc_type="anotadores", id=userId, body={"doc": _doc})
-
-        # Return next available tweet.
-        return self.__nextTweet(userId)
-
-
-class ElasticsearchSession(CallbackDict, SessionMixin):
-    def __init__(self, userId):
-        super(ElasticsearchSession, self).__init__()
-        self.userId = userId
-
-
-class ElasticSearchSessionInterface(SessionInterface):
-    def open_session(self, app, request):
-        userId = request.cookies.get(app.session_cookie_name)
-        if userId is None:
-            userId = str(uuid4())
-            es.index(index="test", doc_type="anotadores", id=userId, body={})
-        return ElasticsearchSession(userId)
-
-    def save_session(self, app, session, response):
-        domain = self.get_cookie_domain(app)
-        if session is None:
-            response.delete_cookie(app.session_cookie_name, domain=domain)
-            return
-
-        # TODO: Jonatas, você tem certeza que é necessário apagar o cookie antes de setá-lo?
-        response.delete_cookie(app.session_cookie_name, domain=domain)
-        expires = time.time() + 3650 * 24 * 3600
-        response.set_cookie(app.session_cookie_name, session.userId,
-                            expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
-                            httponly=True, domain=domain)
 
 
 @app.route('/')
@@ -268,5 +132,5 @@ def annotateTweet():
 if __name__ == '__main__':
     with app.app_context():
         current_app.annManager = AnnotationManager(Elasticsearch(['http://localhost:9200']))
-    app.session_interface = ElasticSearchSessionInterface()
+    app.session_interface = ElasticSearchSessionInterface(es)
     app.run(host='127.0.0.1')
