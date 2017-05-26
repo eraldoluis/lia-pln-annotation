@@ -63,8 +63,6 @@ def emailLogin():
 
 @app.route('/')
 def index():
-
-    print session.userId
     """
     Render the annotation page using the current tweet for the logged user.
     :return:
@@ -80,7 +78,10 @@ def index():
 
 
     # Get the oEmbed HTML for the current tweet of the logged user.
-    tweet = annManager.getCurrentTweet(session.userId)
+    if request.args.get('pular') is None:
+        tweet = annManager.getCurrentTweet(session.userId)
+    else:
+        annManager.skipTwitter(session.userId)
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
     oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
     oEmbedResp = requests.get(oEmbedUrl)

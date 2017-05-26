@@ -1,5 +1,15 @@
 <!doctype html>
 <title>Mention Classifier Display</title>
+
+<style media="screen" type="text/css">
+
+form {
+    display: inline;
+}
+
+</style>
+
+
 <FORM ACTION="annotate" METHOD="post">
 
     <head>
@@ -29,4 +39,8 @@
 
     {% endblock %}
 
+</FORM>
+
+<FORM ACTION="/" METHOD="get">
+    <input type="submit" name="pular" value="Pular">
 </FORM>
