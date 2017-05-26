@@ -21,6 +21,7 @@ class ElasticSearchSessionInterface(SessionInterface):
         if userId is None:
             userId = str(uuid4())
             self.es.index(index="test", doc_type="anotadores", id=userId, body={})
+
         return ElasticsearchSession(userId)
 
     def save_session(self, app, session, response):
@@ -29,8 +30,6 @@ class ElasticSearchSessionInterface(SessionInterface):
             response.delete_cookie(app.session_cookie_name, domain=domain)
             return
 
-        # TODO: Jonatas, você tem certeza que é necessário apagar o cookie antes de setá-lo?
-        response.delete_cookie(app.session_cookie_name, domain=domain)
         expires = time.time() + 3650 * 24 * 3600
         response.set_cookie(app.session_cookie_name, session.userId,
                             expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
