@@ -14,7 +14,6 @@ from session_manager import ElasticSearchSessionInterface
 app = Flask(__name__)
 app.secret_key = '\x1c\xfb|o\xcc\r\x96\xc4\xe4\xfe\xaf\xb9\x16b\x96n0+{Nd|+\xd4'
 
-
 def getElasticSearchClient():
     """
     Elasticsearch client is bounded to the request (flask.g).
@@ -52,13 +51,34 @@ es = LocalProxy(getElasticSearchClient)
 # Proxy variable to the annotation manager object.
 annManager = LocalProxy(getAnnotationManager)
 
+@app.route('/login',methods=['GET', 'POST'])
+def emailLogin():
+    email = request.form.get('email')
+    email_dict = {'email': email}
+    userID = request.form.get('userID')
+    es.update(index="test", doc_type="anotadores", id=userID, body={'doc': email_dict})
+    return redirect('/')
+
+
 
 @app.route('/')
 def index():
+
+    print session.userId
     """
     Render the annotation page using the current tweet for the logged user.
     :return:
     """
+
+    # Checks if the user has an e-mail attached to it
+    userInfo = es.get(index="test", doc_type="anotadores", id=session.userId)
+    try:
+        email = userInfo['_source']['email']
+    except:
+        return render_template("login_page.html", userID=session.userId)
+
+
+
     # Get the oEmbed HTML for the current tweet of the logged user.
     tweet = annManager.getCurrentTweet(session.userId)
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
