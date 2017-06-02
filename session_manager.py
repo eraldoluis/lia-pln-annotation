@@ -21,7 +21,6 @@ class ElasticSearchSessionInterface(SessionInterface):
         userId = request.cookies.get(app.session_cookie_name)
         if userId is None:
             userId = str(uuid4())
-            self.es.index(index="test", doc_type="anotadores", id=userId, body={})
         else:
             try:
                 self.email = self.es.get(index="test", doc_type="anotadores", id=userId)['_source']['email']

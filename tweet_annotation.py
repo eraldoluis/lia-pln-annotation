@@ -53,20 +53,25 @@ annManager = LocalProxy(getAnnotationManager)
 
 @app.route('/login',methods=['GET', 'POST'])
 def emailLogin():
+    if request.method == 'GET':
+        return redirect('/')
+
     email = request.form.get('email')
     try:
-        r = es.search(index="test",doc_type="anotadores",body={
+        hits = es.search(index="test", doc_type="anotadores", body={
             "query": {
-                "match": {
+                "term": {
                     "email": email
                 }
             }
-        })
-        session.userId = r['hits']['hits']['_score']['_id']
-        response.delete_cookie(app.session_cookie_name, domain=domain)
-        response.set_cookie(app.session_cookie_name, session.userId,
-                            expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
-                            httponly=True, domain=domain)
+        })["hits"]["hits"]
+
+        if len(hits) != 0:
+            session.userId = hits[0]['_id']
+            session.email = ...
+        else:
+            session.email = ...
+            self.es.index(index="test", doc_type="anotadores", id=userId, body={})
     except:
         pass
     email_dict = {'email': email}
