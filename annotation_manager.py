@@ -98,7 +98,7 @@ class AnnotationManager:
         _doc = self.es.get(index='test', doc_type='anotadores', id=userId)['_source']
 
         # Append the given annotation (if any).
-        if annotation in ("yes", "no"):
+        if annotation in ("Sim", "Nao","Nao Sei"):
             # Append the given annotation.
             annotations = _doc.setdefault('annotations', [])
             annotations.append({'tweet_id_str': tweetId, 'annotation': annotation})

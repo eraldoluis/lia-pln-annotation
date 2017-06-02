@@ -13,14 +13,20 @@ class ElasticsearchSession(CallbackDict, SessionMixin):
 
 
 class ElasticSearchSessionInterface(SessionInterface):
-    def __init__(self, es):
+    def __init__(self, es,email):
         self.es = es
+        self.email = email
 
     def open_session(self, app, request):
         userId = request.cookies.get(app.session_cookie_name)
         if userId is None:
             userId = str(uuid4())
             self.es.index(index="test", doc_type="anotadores", id=userId, body={})
+        else:
+            try:
+                self.email = self.es.get(index="test", doc_type="anotadores", id=userId)['_source']['email']
+            except:
+                self.email = None
 
         return ElasticsearchSession(userId)
 

@@ -54,26 +54,42 @@ annManager = LocalProxy(getAnnotationManager)
 @app.route('/login',methods=['GET', 'POST'])
 def emailLogin():
     email = request.form.get('email')
+    try:
+        r = es.search(index="test",doc_type="anotadores",body={
+            "query": {
+                "match": {
+                    "email": email
+                }
+            }
+        })
+        session.userId = r['hits']['hits']['_score']['_id']
+        response.delete_cookie(app.session_cookie_name, domain=domain)
+        response.set_cookie(app.session_cookie_name, session.userId,
+                            expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
+                            httponly=True, domain=domain)
+    except:
+        pass
     email_dict = {'email': email}
+    print email_dict
     userID = request.form.get('userID')
-    es.update(index="test", doc_type="anotadores", id=userID, body={'doc': email_dict})
+    print userID
+    es.update(index="test", doc_type="anotadores", id=userID, body={'doc':email_dict})
     return redirect('/')
 
 
 
-@app.route('/')
+@app.route('/',methods=['GET','POST'])
 def index():
     """
     Render the annotation page using the current tweet for the logged user.
     :return:
     """
-
-    # Checks if the user has an e-mail attached to it
-    userInfo = es.get(index="test", doc_type="anotadores", id=session.userId)
-    try:
-        email = userInfo['_source']['email']
-    except:
+    if(request.form.get('submit') == "Logout"):
+        app.session_interface.email = None
         return render_template("login_page.html", userID=session.userId)
+    # Checks if the user has an e-mail attached to it
+    if(app.session_interface.email is None):
+        return render_template("login_page.html",userID=session.userId)
 
 
 
@@ -104,7 +120,7 @@ def index():
 
     # Render the annotation page.
     return render_template('tweet_annotation.html', userId=session.userId, tweetId=tweet['id_str'],
-                           tweet=tweetHtml, context=u"à série Supernatural")
+                           tweet=tweetHtml, context=u"à série Supernatural",email=app.session_interface.email)
 
 
 @app.route('/annotate', methods=['GET', 'POST'])
@@ -139,7 +155,7 @@ def annotateTweet():
         return redirect('/')
 
     # Get the provided annotation.
-    annotation = request.form.get("answer")
+    annotation = request.form.get("submit")
 
     # Save it to ES.
     annManager.annotate(userId, tweetId, annotation)
@@ -153,5 +169,5 @@ def annotateTweet():
 if __name__ == '__main__':
     with app.app_context():
         current_app.annManager = AnnotationManager(Elasticsearch(['http://localhost:9200']))
-    app.session_interface = ElasticSearchSessionInterface(es)
+    app.session_interface = ElasticSearchSessionInterface(es,"")
     app.run(host='127.0.0.1')
