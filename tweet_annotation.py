@@ -14,6 +14,7 @@ from session_manager import ElasticSearchSessionInterface
 app = Flask(__name__)
 app.secret_key = '\x1c\xfb|o\xcc\r\x96\xc4\xe4\xfe\xaf\xb9\x16b\x96n0+{Nd|+\xd4'
 
+
 def getElasticSearchClient():
     """
     Elasticsearch client is bounded to the request (flask.g).
@@ -41,7 +42,15 @@ def getAnnotationManager():
     with app.app_context():
         _annManager = getattr(current_app, 'annManager', None)
         if _annManager is None:
-            _annManager = current_app.annManager = AnnotationManager(Elasticsearch(['http://localhost:9200']))
+            esFilter = {
+                "term": {
+                    "start": "2017-02-20T16:33:25.093458-04:00"
+                }
+            }
+            _annManager = AnnotationManager(name="Supernatural", esClient=Elasticsearch(['http://localhost:9200']),
+                                            index="ctrls", annotatorType="annotator",
+                                            annotationType="relevanceAnnotation", esFilter=esFilter, logger=app.logger)
+            current_app.annManager = _annManager
         return _annManager
 
 
@@ -51,19 +60,26 @@ es = LocalProxy(getElasticSearchClient)
 # Proxy variable to the annotation manager object.
 annManager = LocalProxy(getAnnotationManager)
 
-@app.route('/login',methods=['GET', 'POST'])
+
+@app.route('/login', methods=['GET', 'POST'])
 def emailLogin():
     email = request.form.get('email')
     email_dict = {'email': email}
-    userID = request.form.get('userID')
-    es.update(index="test", doc_type="anotadores", id=userID, body={'doc': email_dict})
-    return redirect('/')
 
+    # Check if the logged user is making the request.
+    userId = session.userId
+    if request.form.get('userId') != userId:
+        flash(u'Usuário com IDs inconsistentes!')
+        app.logger.error(
+            u'Usuário com IDs inconsistentes (%s != %s) ao tentar logar!' % (userId, request.form.get('userId')))
+        return redirect('/')
+
+    es.update(index="test", doc_type="anotadores", id=userId, body={'doc': email_dict})
+    return redirect('/')
 
 
 @app.route('/')
 def index():
-
     print session.userId
     """
     Render the annotation page using the current tweet for the logged user.
@@ -71,23 +87,20 @@ def index():
     """
 
     # Checks if the user has an e-mail attached to it
-    userInfo = es.get(index="test", doc_type="anotadores", id=session.userId)
-    try:
-        email = userInfo['_source']['email']
-    except:
+    if session.email is None:
         return render_template("login_page.html", userID=session.userId)
 
-
-
     # Get the oEmbed HTML for the current tweet of the logged user.
-    tweet = annManager.getCurrentTweet(session.userId)
+    (tweetId, tweet) = annManager.getItem(session.userId)
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
     oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
     oEmbedResp = requests.get(oEmbedUrl)
 
     if oEmbedResp.status_code != 200:
         # Não retornou com sucesso (por alguma razão que desconheço).
-        annManager.skipTweet(session.userId)
+        annManager.annotate(session.userId, tweetId,
+                            "Code: %d / Reason: %s" % (oEmbedResp.reason, oEmbedResp.status_code),
+                            invalidate=True)
         return redirect('/')
 
     # Load the returned tweet JSON.
@@ -95,7 +108,8 @@ def index():
 
     if 'html' not in tweetJson:
         # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
-        annManager.skipTweet(session.userId)
+        annManager.annotate(session.userId, tweetId, "Twitter API returned an error!", invalidate=True)
+        app.logger.error(str(tweetJson))
         return redirect('/')
 
     # Get the HTML content.
@@ -150,7 +164,8 @@ def annotateTweet():
 
 
 if __name__ == '__main__':
-    with app.app_context():
-        current_app.annManager = AnnotationManager(Elasticsearch(['http://localhost:9200']))
+    # Call this method here in order to create the singleton before starting the app.
+    getAnnotationManager()
+
     app.session_interface = ElasticSearchSessionInterface(es)
     app.run(host='127.0.0.1')
