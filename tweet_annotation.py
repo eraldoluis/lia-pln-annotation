@@ -7,12 +7,16 @@ import flask
 from elasticsearch import Elasticsearch
 from flask import Flask, render_template, request, session, redirect, flash, current_app
 from werkzeug.local import LocalProxy
+from codecs import open
 
 from annotation_manager import AnnotationManager
 from session_manager import ElasticSearchSessionInterface
 
 app = Flask(__name__)
-app.secret_key = '\x1c\xfb|o\xcc\r\x96\xc4\xe4\xfe\xaf\xb9\x16b\x96n0+{Nd|+\xd4'
+# app.secret_key = '\x1c\xfb|o\xcc\r\x96\xc4\xe4\xfe\xaf\xb9\x16b\x96n0+{Nd|+\xd4'
+app.secret_key = None
+with open('app_secret_key', 'rt', 'utf8') as f:
+    app.secret_key = f.read()
 
 
 def getElasticSearchClient():
@@ -42,14 +46,10 @@ def getAnnotationManager():
     with app.app_context():
         _annManager = getattr(current_app, 'annManager', None)
         if _annManager is None:
-            esFilter = {
-                "term": {
-                    "start": "2017-02-20T16:33:25.093458-04:00"
-                }
-            }
             _annManager = AnnotationManager(name="Supernatural", esClient=Elasticsearch(['http://localhost:9200']),
-                                            index="ctrls", annotatorType="annotator",
-                                            annotationType="relevanceAnnotation", esFilter=esFilter, logger=app.logger)
+                                            index="ctrls_annotation", annotatorType="annotator",
+                                            annotationType="annotation_relevance", annotationName="supernatural",
+                                            numAnnotationsPerItem=2, logger=app.logger)
             current_app.annManager = _annManager
         return _annManager
 
@@ -88,17 +88,24 @@ def index():
 
     # Checks if the user has an e-mail attached to it
     if session.email is None:
-        return render_template("login_page.html", userID=session.userId)
+        return render_template("login_page.html", userId=session.userId)
 
     # Get the oEmbed HTML for the current tweet of the logged user.
-    (tweetId, tweet) = annManager.getItem(session.userId)
+    item = annManager.getItem(session.userId)
+    if item is None:
+        app.logger.error("No item to be annotated!")
+        return render_template('tweet_annotation.html', userId=session.userId,
+                               message="Todos os tweets foram anotados. Obrigado!")
+
+    tweet = item.doc["tweet"]
     tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
     oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
     oEmbedResp = requests.get(oEmbedUrl)
 
     if oEmbedResp.status_code != 200:
         # Não retornou com sucesso (por alguma razão que desconheço).
-        annManager.annotate(session.userId, tweetId,
+        # Invalida tweet para sempre.
+        annManager.annotate(session.userId, item.id,
                             "Code: %d / Reason: %s" % (oEmbedResp.reason, oEmbedResp.status_code),
                             invalidate=True)
         return redirect('/')
@@ -108,7 +115,7 @@ def index():
 
     if 'html' not in tweetJson:
         # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
-        annManager.annotate(session.userId, tweetId, "Twitter API returned an error!", invalidate=True)
+        annManager.annotate(session.userId, item.id, "Twitter API returned an error!", invalidate=True)
         app.logger.error(str(tweetJson))
         return redirect('/')
 
@@ -116,7 +123,7 @@ def index():
     tweetHtml = tweetJson['html']
 
     # Render the annotation page.
-    return render_template('tweet_annotation.html', userId=session.userId, tweetId=tweet['id_str'],
+    return render_template('tweet_annotation.html', userId=session.userId, tweetId=item.id,
                            tweet=tweetHtml, context=u"à série Supernatural")
 
 
@@ -142,10 +149,11 @@ def annotateTweet():
 
     # Check if the given tweet annotation is related to the current tweet for the logged user.
     # This can fail when the user refresh a previous submitted form.
-    tweetId = annManager.getCurrentTweet(userId)['id_str']
-    if request.form.get('tweetId') != tweetId:
+    item = annManager.getItem(userId)
+    itemId = item.id
+    if request.form.get('tweetId') != itemId:
         flash(u'Anotação de tweet com ID inconsistente!')
-        app.logger.error(u'Anotação de tweet com ID inconsistente (%s != %s) / userId: %s' % (tweetId,
+        app.logger.error(u'Anotação de tweet com ID inconsistente (%s != %s) / userId: %s' % (itemId,
                                                                                               request.form.get(
                                                                                                   'tweetId'),
                                                                                               userId))
@@ -154,12 +162,15 @@ def annotateTweet():
     # Get the provided annotation.
     annotation = request.form.get("answer")
 
+    if annotation is None:
+        annotation = "skip"
+
     # Save it to ES.
-    annManager.annotate(userId, tweetId, annotation)
+    annManager.annotate(userId, itemId, annotation)
 
     # Move to the next tweet.
     flash('Tweet analisado com sucesso!')
-    app.logger.info(u'Usuário %s anotou o tweet %s como %s' % (userId, tweetId, annotation))
+    app.logger.info(u'Usuário %s anotou o tweet %s como %s' % (userId, itemId, annotation))
     return redirect('/')
 
 

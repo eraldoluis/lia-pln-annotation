@@ -8,7 +8,7 @@ class AnnotatedItem:
         self.doc = source["doc"]
         self.docId = source["docId"]
 
-        self.numValidAnnotations = source["numValidAnnotations"]
+        self.numValidAnnotations = source.get("numValidAnnotations", 0)
 
         self.annotations = {}
         if "annotations" in source:

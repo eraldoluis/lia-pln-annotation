@@ -1,5 +1,5 @@
 # coding=utf-8
-import datetime
+from datetime import datetime
 from threading import Thread, Condition
 
 from dateutil import tz
@@ -17,7 +17,7 @@ class AnnotationManager(Thread):
     shared by all requests/users.
     """
 
-    def __init__(self, name, esClient, index, annotatorType, annotationType, esFilter, numAnnotationsPerItem, logger):
+    def __init__(self, name, esClient, index, annotatorType, annotationType, annotationName, numAnnotationsPerItem, logger):
         """
         Create a new annotation manager object and spawn a new thread to produce new annotation items.
 
@@ -26,7 +26,7 @@ class AnnotationManager(Thread):
         :param index: index in ES to be used.
         :param annotatorType: document type for annotators (users).
         :param annotationType: document type for annotations (tweets).
-        :param esFilter: filter dict to use within the ES query to retrieve items to be annotated.
+        :param annotationName: task name which identifies the annotation task (all items have this name).
         :param numAnnotationsPerItem: number of annotations to be collected for each item.
         :param logger: logger object.
         """
@@ -37,7 +37,7 @@ class AnnotationManager(Thread):
         self.index = index
         self.annotatorType = annotatorType
         self.annotationType = annotationType
-        self.filter = esFilter
+        self.annotationName = annotationName
         self.numAnnotationsPerItem = numAnnotationsPerItem
         self.logger = logger
 
@@ -79,11 +79,16 @@ class AnnotationManager(Thread):
                 if lenUn < self.numUnannotatedItems:
                     self.__fillUnannotatedItems()
 
+                    if len(self.unannotatedItems) == 0:
+                        self.running = False
+                        self.__condition.notifyAll()
+                        break
+
                     # Notify consumers if the list was empty.
                     if lenUn == 0 and len(self.unannotatedItems) > 0:
                         self.__condition.notifyAll()
 
-                self.wait()
+                self.__condition.wait()
 
     def stop(self):
         self.running = False
@@ -101,10 +106,10 @@ class AnnotationManager(Thread):
         with self.__condition:
             # Check if the annotator is holding some item.
             if annotatorId in self.mapAnnotatorItem:
-                (itemId, item) = self.mapAnnotatorItem[annotatorId]
+                item = self.mapAnnotatorItem[annotatorId]
                 # Update the obtained time for this item.
                 item.holding[annotatorId]["time"] = datetime.now(tz.tzlocal())
-                return itemId, item.doc
+                return item
 
             return self.__nextItem(annotatorId)
 
@@ -131,7 +136,7 @@ class AnnotationManager(Thread):
                 return self.__nextItem(annotatorId)
 
             # Check if the annotator is holding the given item.
-            (itemId, item) = self.mapAnnotatorItem.get(annotatorId)
+            item = self.mapAnnotatorItem.get(annotatorId)
             if annotatorId not in item.holding:
                 self.logger.error(
                     "Annotator %s tried to annotate item %s but s/he was not holding this item. Getting a new one." % (
@@ -170,16 +175,26 @@ class AnnotationManager(Thread):
         Fill the self.partiallyAnnotatedItems list with all items from Elasticsearch that includes some annotation but
         not the required number (self.numAnnotationsPerItem).
         """
+        # Query: numValidAnnotations < self.numAnnotationsPerItem and annotations != None and invalid == None
         _scan = scan(self.es, index=self.index, doc_type=self.annotationType, query={
             "query": {
                 "bool": {
                     "filter": [
                         {
+                            "term": {
+                                "name": self.annotationName
+                            }
+                        },
+                        {
                             "range": {
                                 "numValidAnnotations": {
-                                    "lt": self.numAnnotationsPerItem,
-                                    "gt": 0
+                                    "lt": self.numAnnotationsPerItem
                                 }
+                            }
+                        },
+                        {
+                            "exists": {
+                                "field": "annotations"
                             }
                         }
                     ],
@@ -192,7 +207,10 @@ class AnnotationManager(Thread):
             }
         })
 
-        self.partiallyAnnotatedItems = [(item["_id"], item["_source"]) for item in _scan]
+        for res in _scan:
+            item = AnnotatedItem(res["_id"], res["_source"])
+            # Include one copy of this item for each missing annotation.
+            self.partiallyAnnotatedItems += [item] * (self.numAnnotationsPerItem - item.numValidAnnotations)
 
     def __fillUnannotatedItems(self):
         """
@@ -203,6 +221,7 @@ class AnnotationManager(Thread):
         n = self.numUnannotatedItems - len(self.unannotatedItems)
 
         # Search n new items from the previous point (self.searchFrom).
+        # annotations == None and invalid == None
         res = self.es.search(index=self.index, doc_type=self.annotationType, body={
             "from": self.searchFrom,
             "size": n,
@@ -211,7 +230,11 @@ class AnnotationManager(Thread):
                     "query": {
                         "bool": {
                             "filter": [
-                                self.filter
+                                {
+                                    "term": {
+                                        "name": self.annotationName
+                                    }
+                                }
                             ],
                             "must_not": {
                                 "bool": {
@@ -240,13 +263,17 @@ class AnnotationManager(Thread):
         })
 
         hits = res["hits"]["hits"]
-        hits = [hit["_source"] for hit in hits]
 
         # Update from index.
         self.searchFrom += len(hits)
 
         # Append the retrieved items to the list.
-        self.unannotatedItems += [(item["_id"], item["_source"]) for item in hits]
+        for hit in hits:
+            item = AnnotatedItem(hit["_id"], hit["_source"])
+            self.unannotatedItems.append(item)
+
+        if len(self.unannotatedItems) == 0:
+            self.logger.error("Unavailable items to annotate")
 
     def __nextItem(self, annotatorId):
         """
@@ -260,7 +287,7 @@ class AnnotationManager(Thread):
         """
         # Look for partially annotated items.
         for i in xrange(len(self.partiallyAnnotatedItems)):
-            (itemId, item) = self.partiallyAnnotatedItems[i]
+            item = self.partiallyAnnotatedItems[i]
             if annotatorId not in item.annotations:
                 # Signal item that this annotator is holding it.
                 item.holding[annotatorId] = {
@@ -273,7 +300,7 @@ class AnnotationManager(Thread):
                 # Remove this item copy form the list.
                 del self.partiallyAnnotatedItems[i]
 
-                return itemId, item
+                return item
 
         # Check if there is some unannotated item available. Otherwise, wait.
         while len(self.unannotatedItems) == 0 and self.running:
@@ -281,7 +308,7 @@ class AnnotationManager(Thread):
 
         if self.running:
             # Get one unannotated item.
-            (itemId, item) = AnnotatedItem(self.unannotatedItems.pop(0))
+            item = self.unannotatedItems.pop(0)
             if len(self.unannotatedItems) < self.numUnannotatedItems / 2:
                 # Notify producer thread if the list length is less than half of the required length.
                 self.__condition.notifyAll()
@@ -292,12 +319,12 @@ class AnnotationManager(Thread):
             }
 
             # Store that this annotator is holding the item.
-            self.mapAnnotatorItem[annotatorId] = (itemId, item)
+            self.mapAnnotatorItem[annotatorId] = item
 
             # Insert copies of the item in the partially annotated list, so next annotators can get this item.
-            self.partiallyAnnotatedItems += [(itemId, item)] * (self.numAnnotationsPerItem - 1)
+            self.partiallyAnnotatedItems += [item] * (self.numAnnotationsPerItem - 1)
 
-            return itemId, item.doc
+            return item
 
         # Something odd occurred.
         self.logger.error("No item could be retrieved for annotator %s" % annotatorId)
