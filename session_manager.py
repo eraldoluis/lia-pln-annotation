@@ -7,9 +7,10 @@ from werkzeug.datastructures import CallbackDict
 
 
 class ElasticsearchSession(CallbackDict, SessionMixin):
-    def __init__(self, userId):
+    def __init__(self, userId,email=None):
         super(ElasticsearchSession, self).__init__()
         self.userId = userId
+        self.email = email
 
 
 class ElasticSearchSessionInterface(SessionInterface):
@@ -21,6 +22,9 @@ class ElasticSearchSessionInterface(SessionInterface):
         if userId is None:
             userId = str(uuid4())
             self.es.index(index="test", doc_type="anotadores", id=userId, body={})
+        else:
+            try:
+                email = es.
 
         return ElasticsearchSession(userId)
 

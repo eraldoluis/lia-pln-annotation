@@ -139,7 +139,7 @@ def annotateTweet():
         return redirect('/')
 
     # Get the provided annotation.
-    annotation = request.form.get("answer")
+    annotation = request.form.get("submit")
 
     # Save it to ES.
     annManager.annotate(userId, tweetId, annotation)
