@@ -5,7 +5,7 @@ import requests
 
 import flask
 from elasticsearch import Elasticsearch
-from flask import Flask, render_template, request, session, redirect, flash, current_app
+from flask import Flask, render_template, request, session, redirect, flash, current_app,make_response
 from werkzeug.local import LocalProxy
 
 from annotation_manager import AnnotationManager
@@ -53,15 +53,39 @@ annManager = LocalProxy(getAnnotationManager)
 
 @app.route('/login',methods=['GET', 'POST'])
 def emailLogin():
+    if request.method == 'GET':
+        return redirect('/')
+
     email = request.form.get('email')
-    email_dict = {'email': email}
-    userID = request.form.get('userID')
-    es.update(index="test", doc_type="anotadores", id=userID, body={'doc': email_dict})
+    try:
+        hits = es.search(index="test", doc_type="anotadores", body={
+            "query": {
+                "term": {
+                    "email": email
+                }
+            }
+        })["hits"]["hits"]
+
+        if len(hits) != 0:
+            session.userId = hits[0]['_id']
+            session.userEmail = email
+
+        else:
+            session.userEmail = email
+            session.userId = str(uuid4())
+            self.es.index(index="test", doc_type="anotadores", id=session.userId, body={"email":email})
+        response = make_response()
+        response.set_cookie(app.session_cookie_name, session.userId,
+                            expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
+                            httponly=True, domain=domain)
+
+    except:
+        pass
     return redirect('/')
 
 
 
-@app.route('/')
+@app.route('/',methods=['GET','POST'])
 def index():
     """
     Render the annotation page using the current tweet for the logged user.
@@ -69,10 +93,11 @@ def index():
     """
 
     # Checks if the user has an e-mail attached to it
-    userInfo = es.get(index="test", doc_type="anotadores", id=session.userId)
-    try:
-        email = userInfo['_source']['email']
-    except:
+    if(session.userEmail is None):
+        return render_template("login_page.html",userID=session.userId)
+
+    if(request.form.get('submit') == "Logout"):
+        session.userEmail = None
         return render_template("login_page.html", userID=session.userId)
 
 
@@ -104,7 +129,7 @@ def index():
 
     # Render the annotation page.
     return render_template('tweet_annotation.html', userId=session.userId, tweetId=tweet['id_str'],
-                           tweet=tweetHtml, context=u"à série Supernatural")
+                           tweet=tweetHtml, context=u"à série Supernatural",email=session.userEmail)
 
 
 @app.route('/annotate', methods=['GET', 'POST'])
