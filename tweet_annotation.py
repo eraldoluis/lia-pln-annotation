@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import time
 import json
 import requests
-
+from uuid import uuid4
 import flask
 from elasticsearch import Elasticsearch
-from flask import Flask, render_template, request, session, redirect, flash, current_app,make_response
+from flask import Flask, render_template, request, session, redirect, flash, current_app,make_response,url_for
 from werkzeug.local import LocalProxy
 
 from annotation_manager import AnnotationManager
@@ -54,33 +55,38 @@ annManager = LocalProxy(getAnnotationManager)
 @app.route('/login',methods=['GET', 'POST'])
 def emailLogin():
     if request.method == 'GET':
+        session.userEmail = None
+        return render_template("login_page.html", userID=session.userId)
+    return render_template("login_page.html", userID=session.userId)
+
+
+@app.route('/loginDone',methods=['GET', 'POST'])
+def loginProcessing():
+    if request.method == 'GET':
         return redirect('/')
 
     email = request.form.get('email')
-    try:
-        hits = es.search(index="test", doc_type="anotadores", body={
+    hits = es.search(index="test", doc_type="anotadores", body={
             "query": {
                 "term": {
                     "email": email
                 }
             }
         })["hits"]["hits"]
+    if len(hits) != 0:
+        session.userId = hits[0]['_id']
+        session.userEmail = email
 
-        if len(hits) != 0:
-            session.userId = hits[0]['_id']
-            session.userEmail = email
-
-        else:
-            session.userEmail = email
-            session.userId = str(uuid4())
-            self.es.index(index="test", doc_type="anotadores", id=session.userId, body={"email":email})
-        response = make_response()
-        response.set_cookie(app.session_cookie_name, session.userId,
+    else:
+        session.userEmail = email
+        session.userId = str(uuid4())
+        es.index(index="test", doc_type="anotadores", id=session.userId, body={"email":email})
+    expires = time.time() + 3650 * 24 * 3600
+    response = make_response()
+    response.set_cookie(app.session_cookie_name, session.userId,
                             expires=time.strftime("%a, %d-%b-%Y %T GMT", time.gmtime(expires)),
-                            httponly=True, domain=domain)
+                            httponly=True)
 
-    except:
-        pass
     return redirect('/')
 
 
@@ -94,11 +100,11 @@ def index():
 
     # Checks if the user has an e-mail attached to it
     if(session.userEmail is None):
-        return render_template("login_page.html",userID=session.userId)
+        return redirect('/login')
 
     if(request.form.get('submit') == "Logout"):
         session.userEmail = None
-        return render_template("login_page.html", userID=session.userId)
+        return redirect('/login')
 
 
 
