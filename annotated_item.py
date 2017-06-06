@@ -19,7 +19,7 @@ class AnnotatedItem:
                 }
 
         # Holding annotators dictionary (key is annotatorId).
-        self.holding = {}
+        self.holdingAnnotators = {}
 
         # Possible invalidation caused by some annotator.
         self.invalid = source.get("invalid")

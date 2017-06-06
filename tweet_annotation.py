@@ -46,10 +46,9 @@ def getAnnotationManager():
     with app.app_context():
         _annManager = getattr(current_app, 'annManager', None)
         if _annManager is None:
-            _annManager = AnnotationManager(name="Supernatural", esClient=Elasticsearch(['http://localhost:9200']),
-                                            index="ctrls_annotation", annotatorType="annotator",
-                                            annotationType="annotation_relevance", annotationName="supernatural",
-                                            numAnnotationsPerItem=2, logger=app.logger)
+            _annManager = AnnotationManager(name="teste", esClient=Elasticsearch(['http://localhost:9200']),
+                                            index="test_annotation_index", annotationType="test_annotation",
+                                            annotationName="teste", numAnnotationsPerItem=2, logger=app.logger)
             current_app.annManager = _annManager
         return _annManager
 
@@ -97,30 +96,36 @@ def index():
         return render_template('tweet_annotation.html', userId=session.userId,
                                message="Todos os tweets foram anotados. Obrigado!")
 
-    tweet = item.doc["tweet"]
-    tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
-    oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
-    oEmbedResp = requests.get(oEmbedUrl)
+    # tweet = item.doc["tweet"]
+    # tweetUrl = 'https://twitter.com/%s/status/%s' % (tweet["user"]["screen_name"], tweet["id_str"])
+    # oEmbedUrl = 'https://publish.twitter.com/oembed?hide_thread=t&url=%s' % tweetUrl
+    # oEmbedResp = requests.get(oEmbedUrl)
+    #
+    # if oEmbedResp.status_code != 200:
+    #     # Não retornou com sucesso (por alguma razão que desconheço).
+    #     # Invalida tweet para sempre.
+    #     annManager.annotate(session.userId, item.id,
+    #                         "Code: %d / Reason: %s" % (oEmbedResp.reason, oEmbedResp.status_code),
+    #                         invalidate=True)
+    #     return redirect('/')
+    #
+    # # Load the returned tweet JSON.
+    # tweetJson = json.loads(oEmbedResp.content)
+    #
+    # if 'html' not in tweetJson:
+    #     # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
+    #     annManager.annotate(session.userId, item.id, "Twitter API returned an error!", invalidate=True)
+    #     app.logger.error(str(tweetJson))
+    #     return redirect('/')
+    #
+    # # Get the HTML content.
+    # tweetHtml = tweetJson['html']
 
-    if oEmbedResp.status_code != 200:
-        # Não retornou com sucesso (por alguma razão que desconheço).
-        # Invalida tweet para sempre.
-        annManager.annotate(session.userId, item.id,
-                            "Code: %d / Reason: %s" % (oEmbedResp.reason, oEmbedResp.status_code),
-                            invalidate=True)
+    if item.docId % 5 == 0:
+        annManager.invalidate(session.userId, item.id, "Erro simulado")
         return redirect('/')
 
-    # Load the returned tweet JSON.
-    tweetJson = json.loads(oEmbedResp.content)
-
-    if 'html' not in tweetJson:
-        # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
-        annManager.annotate(session.userId, item.id, "Twitter API returned an error!", invalidate=True)
-        app.logger.error(str(tweetJson))
-        return redirect('/')
-
-    # Get the HTML content.
-    tweetHtml = tweetJson['html']
+    tweetHtml = "<h3>%s</h3>" % item.doc
 
     # Render the annotation page.
     return render_template('tweet_annotation.html', userId=session.userId, tweetId=item.id,
@@ -163,10 +168,9 @@ def annotateTweet():
     annotation = request.form.get("answer")
 
     if annotation is None:
-        annotation = "skip"
-
-    # Save it to ES.
-    annManager.annotate(userId, itemId, annotation)
+        annManager.skip(userId, itemId)
+    else:
+        annManager.annotate(userId, itemId, annotation)
 
     # Move to the next tweet.
     flash('Tweet analisado com sucesso!')

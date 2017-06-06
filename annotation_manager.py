@@ -17,14 +17,13 @@ class AnnotationManager(Thread):
     shared by all requests/users.
     """
 
-    def __init__(self, name, esClient, index, annotatorType, annotationType, annotationName, numAnnotationsPerItem, logger):
+    def __init__(self, name, esClient, index, annotationType, annotationName, numAnnotationsPerItem, logger):
         """
         Create a new annotation manager object and spawn a new thread to produce new annotation items.
 
         :param name: friendly, but unique, name for this manager.
         :param esClient: Elasticsearch client.
         :param index: index in ES to be used.
-        :param annotatorType: document type for annotators (users).
         :param annotationType: document type for annotations (tweets).
         :param annotationName: task name which identifies the annotation task (all items have this name).
         :param numAnnotationsPerItem: number of annotations to be collected for each item.
@@ -35,7 +34,6 @@ class AnnotationManager(Thread):
         self.name = name
         self.es = esClient
         self.index = index
-        self.annotatorType = annotatorType
         self.annotationType = annotationType
         self.annotationName = annotationName
         self.numAnnotationsPerItem = numAnnotationsPerItem
@@ -55,14 +53,13 @@ class AnnotationManager(Thread):
         self.partiallyAnnotatedItems = []
 
         # These are items sent to annotators (responding to requests) but not yet annotated by them.
-        self.mapAnnotatorItem = {}
+        self.heldItems = {}
 
         self.searchFrom = 0
 
         self.running = False
 
         # Spawn a new thread.
-        # TODO: check if we can call this method from the constructor.
         self.start()
 
     def run(self):
@@ -74,9 +71,10 @@ class AnnotationManager(Thread):
         self.running = True
         with self.__condition:
             self.__fillPartiallyAnnotatedItems()
+            
             while self.running:
                 lenUn = len(self.unannotatedItems)
-                if lenUn < self.numUnannotatedItems:
+                if lenUn < self.numUnannotatedItems / 2:
                     self.__fillUnannotatedItems()
 
                     if len(self.unannotatedItems) == 0:
@@ -105,70 +103,181 @@ class AnnotationManager(Thread):
         """
         with self.__condition:
             # Check if the annotator is holding some item.
-            if annotatorId in self.mapAnnotatorItem:
-                item = self.mapAnnotatorItem[annotatorId]
+            if annotatorId in self.heldItems:
+                item = self.heldItems[annotatorId]
                 # Update the obtained time for this item.
-                item.holding[annotatorId]["time"] = datetime.now(tz.tzlocal())
+                item.holdingAnnotators[annotatorId]["time"] = datetime.now(tz.tzlocal())
                 return item
 
             return self.__nextItem(annotatorId)
 
-    def annotate(self, annotatorId, itemId, annotation, invalidate=False):
+    def annotate(self, annotatorId, itemId, annotation):
         """
         Save the given annotation and return a new associated item.
-        If invalidate is True, then annotation must be a message describing the cause to invalidate this item;
-        and the item will be invalidate and never returned to any other annotator.
 
         :param annotatorId:
         :param itemId:
-        :param annotation: valid values are 'yes', 'no' and None.
-        :param invalidate: if True, invalidate this item and never return it again for any annotator.
-            In this case, the annotation is a message describing the cause of the invalidation.
-        :return: a new associated tweet.
+        :param annotation:
+        :return: a new associated item for the given annotator.
         """
         with self.__condition:
-            # Check if the annotator is holding some item.
-            if annotatorId not in self.mapAnnotatorItem:
-                self.logger.error(
-                    "Annotator %s tried to annotate item %s but s/he was not holding this item. Getting a new one." % (
-                        annotatorId, itemId))
-                # Annotator was not holding any item. Get a new item.
+            # Check holding dictionaries.
+            if not self.__checkHeldItem(annotatorId, itemId):
                 return self.__nextItem(annotatorId)
 
-            # Check if the annotator is holding the given item.
-            item = self.mapAnnotatorItem.get(annotatorId)
-            if annotatorId not in item.holding:
-                self.logger.error(
-                    "Annotator %s tried to annotate item %s but s/he was not holding this item. Getting a new one." % (
-                        annotatorId, itemId))
-            else:
-                if invalidate:
-                    item.invalid = {
-                        "annotatorId": annotatorId,
-                        "cause": annotation,
-                        "time": datetime.now(tz.tzlocal())
-                    }
-                else:
-                    # Append the given annotation.
-                    item.annotations[annotatorId] = {
-                        "annotation": annotation,
-                        "time": datetime.now(tz.tzlocal())
-                    }
+            # Item held by the given annotator.
+            item = self.heldItems[annotatorId]
 
-                    if annotation in ("yes", "no"):
-                        item.numValidAnnotations += 1
+            # Append the given annotation.
+            item.annotations[annotatorId] = {
+                "annotation": annotation,
+                "time": datetime.now(tz.tzlocal())
+            }
 
-                # Update Elasticsearch.
-                self.es.update(index=self.index, doc_type=self.annotationType, id=item.id,
-                               body={"doc": item.getSourceToUpdate()})
+            # Increment valid annotations count.
+            item.numValidAnnotations += 1
 
-                # Remove annotator from the item's holding dictionary.
-                del item.holding[annotatorId]
+            # Update Elasticsearch.
+            self.es.update(index=self.index, doc_type=self.annotationType, id=item.id,
+                           body={"doc": item.getSourceToUpdate()})
+
+            # Remove annotator from the item's holding dictionary.
+            del item.holdingAnnotators[annotatorId]
+
+            # Remove item from the held-items dictionary.
+            del self.heldItems[annotatorId]
+
+            # Return a new item.
+            return self.__nextItem(annotatorId)
+
+    def invalidate(self, annotatorId, itemId, cause):
+        """
+        Invalidate the given item. This item will never be returned to annotation of any annotator.
+
+        :param annotatorId:
+        :param itemId:
+        :param cause:
+        :return:
+        """
+        with self.__condition:
+            # Check holding dictionaries.
+            if not self.__checkHeldItem(annotatorId, itemId):
+                return self.__nextItem(annotatorId)
+
+            item = self.heldItems[annotatorId]
+            item.invalid = {
+                "annotatorId": annotatorId,
+                "cause": cause,
+                "time": datetime.now(tz.tzlocal())
+            }
+
+            # Update Elasticsearch.
+            self.es.update(index=self.index, doc_type=self.annotationType, id=item.id,
+                           body={"doc": item.getSourceToUpdate()})
+
+            # Remove annotator from the item's holding dictionary.
+            del item.holdingAnnotators[annotatorId]
 
             # Unlink item and annotator.
-            del self.mapAnnotatorItem[annotatorId]
+            del self.heldItems[annotatorId]
 
+            # Remove other occurrences of the invalidated item from the list of partially annotated items.
+            self.partiallyAnnotatedItems = [i for i in self.partiallyAnnotatedItems if i != item]
+
+            # Return next item.
             return self.__nextItem(annotatorId)
+
+    def skip(self, annotatorId, itemId):
+        """
+        Mark the given item as skipped for the given annotator. This item will never be retrieved for this annotator.
+
+        :param annotatorId:
+        :param itemId:
+        :return:
+        """
+        with self.__condition:
+            # Check holding dictionaries.
+            if not self.__checkHeldItem(annotatorId, itemId):
+                return self.__nextItem(annotatorId)
+
+            item = self.heldItems[annotatorId]
+
+            # Append the given annotation.
+            item.annotations[annotatorId] = {
+                "annotation": "skip",
+                "time": datetime.now(tz.tzlocal())
+            }
+
+            # Update Elasticsearch.
+            self.es.update(index=self.index, doc_type=self.annotationType, id=item.id,
+                           body={"doc": item.getSourceToUpdate()})
+
+            # Remove annotator from the item's holding dictionary.
+            del item.holdingAnnotators[annotatorId]
+
+            # Unlink item and annotator.
+            del self.heldItems[annotatorId]
+
+            # Include back the skipped item in the list of partially annotated items.
+            self.partiallyAnnotatedItems.append(item)
+
+            # Return the next item associated to the given annotator.
+            return self.__nextItem(annotatorId)
+
+    def __nextItem(self, annotatorId):
+        """
+        Get a new item to be annotated by the given annotator.
+
+        First, check if there is an item within the self.partiallyAnnotatedItems.
+        If there is not, then get an unannotated item.
+
+        :param annotatorId:
+        :return:
+        """
+        # Look for partially annotated items.
+        for i in xrange(len(self.partiallyAnnotatedItems)):
+            item = self.partiallyAnnotatedItems[i]
+            if annotatorId not in item.annotations:
+                # Signal item that this annotator is holding it.
+                item.holdingAnnotators[annotatorId] = {
+                    "time": datetime.now(tz.tzlocal())
+                }
+
+                # Store that this annotator is holding the item.
+                self.heldItems[annotatorId] = item
+
+                # Remove this item copy form the list.
+                del self.partiallyAnnotatedItems[i]
+
+                return item
+
+        # Check if there is some unannotated item available. Otherwise, wait.
+        while len(self.unannotatedItems) == 0 and self.running:
+            self.__condition.wait()
+
+        if self.running:
+            # Get one unannotated item.
+            item = self.unannotatedItems.pop(0)
+            if len(self.unannotatedItems) < self.numUnannotatedItems / 2:
+                # Notify producer thread if the list length is less than half of the required length.
+                self.__condition.notifyAll()
+
+            # Signal item that this annotator is holding it.
+            item.holdingAnnotators[annotatorId] = {
+                "time": datetime.now(tz.tzlocal())
+            }
+
+            # Store that this annotator is holding the item.
+            self.heldItems[annotatorId] = item
+
+            # Insert copies of the item in the partially annotated list, so next annotators can get this item.
+            self.partiallyAnnotatedItems += [item] * (self.numAnnotationsPerItem - 1)
+
+            return item
+
+        # Something odd occurred.
+        self.logger.error("No item could be retrieved for annotator %s" % annotatorId)
+        return None
 
     def __fillPartiallyAnnotatedItems(self):
         """
@@ -225,6 +334,7 @@ class AnnotationManager(Thread):
         res = self.es.search(index=self.index, doc_type=self.annotationType, body={
             "from": self.searchFrom,
             "size": n,
+            "sort": "docId",
             "query": {
                 "function_score": {
                     "query": {
@@ -254,10 +364,10 @@ class AnnotationManager(Thread):
                             }
                         }
                     },
-                    "random_score": {
-                        "seed": 13
-                    },
-                    "boost_mode": "replace"
+                    # "random_score": {
+                    #     "seed": 13
+                    # },
+                    # "boost_mode": "replace"
                 }
             }
         })
@@ -275,57 +385,30 @@ class AnnotationManager(Thread):
         if len(self.unannotatedItems) == 0:
             self.logger.error("Unavailable items to annotate")
 
-    def __nextItem(self, annotatorId):
+    def __checkHeldItem(self, annotatorId, itemId):
         """
-        Get a new item to be annotated by the given annotator.
-
-        First, check if there is an item within the self.partiallyAnnotatedItems.
-        If there is not, then get an unannotated item.
+        Check if the given item is held by the given annotator. That means to verify if the annotator is in the list of
+        holding annotators of the item and if the item is associated with the annotator in the self.heldItems
+        dictionary.
 
         :param annotatorId:
+        :param itemId:
         :return:
         """
-        # Look for partially annotated items.
-        for i in xrange(len(self.partiallyAnnotatedItems)):
-            item = self.partiallyAnnotatedItems[i]
-            if annotatorId not in item.annotations:
-                # Signal item that this annotator is holding it.
-                item.holding[annotatorId] = {
-                    "time": datetime.now(tz.tzlocal())
-                }
+        # Check if the annotator is holding some item.
+        if annotatorId not in self.heldItems:
+            self.logger.error(
+                "Annotator %s tried to annotate item %s but s/he was not holding this item. Getting a new one." % (
+                    annotatorId, itemId))
+            return False
 
-                # Store that this annotator is holding the item.
-                self.mapAnnotatorItem[annotatorId] = item
+        # Check if the annotator is holding the given item.
+        item = self.heldItems[annotatorId]
+        if annotatorId not in item.holdingAnnotators:
+            self.logger.error(
+                "Annotator %s tried to annotate item %s but s/he was not holding this item. Getting a new one." % (
+                    annotatorId, itemId))
+            del self.heldItems[annotatorId]
+            return False
 
-                # Remove this item copy form the list.
-                del self.partiallyAnnotatedItems[i]
-
-                return item
-
-        # Check if there is some unannotated item available. Otherwise, wait.
-        while len(self.unannotatedItems) == 0 and self.running:
-            self.__condition.wait()
-
-        if self.running:
-            # Get one unannotated item.
-            item = self.unannotatedItems.pop(0)
-            if len(self.unannotatedItems) < self.numUnannotatedItems / 2:
-                # Notify producer thread if the list length is less than half of the required length.
-                self.__condition.notifyAll()
-
-            # Signal item that this annotator is holding it.
-            item.holding[annotatorId] = {
-                "time": datetime.now(tz.tzlocal())
-            }
-
-            # Store that this annotator is holding the item.
-            self.mapAnnotatorItem[annotatorId] = item
-
-            # Insert copies of the item in the partially annotated list, so next annotators can get this item.
-            self.partiallyAnnotatedItems += [item] * (self.numAnnotationsPerItem - 1)
-
-            return item
-
-        # Something odd occurred.
-        self.logger.error("No item could be retrieved for annotator %s" % annotatorId)
-        return None
+        return True

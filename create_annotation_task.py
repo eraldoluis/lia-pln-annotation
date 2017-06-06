@@ -8,8 +8,8 @@ from elasticsearch.helpers import scan
 
 def checkIndexAndType(es, index, docType):
     """
-    Check if the given index and type exist and if the corresponding mapping is correct.
-    If the doc type or the index do not exist, create them.
+    Check if the given index and type exist. If the doc type or the index do not exist, create them and the
+    corresponding mappings.
 
     :param es: Elasticsearch client.
     :param index:
@@ -75,15 +75,24 @@ def checkIndexAndType(es, index, docType):
     return True
 
 
-def create_annotation_task(es, originIndex, originType, targetIndex, targetType, name, query, numberOfDocs=None):
-    checkIndexAndType(es, index=targetIndex, docType=targetType)
+def create_annotation_task(es, index, docType, name, query, numberOfDocs=float('inf')):
+    """
+    Create an annotation item for each doc in the given query.
+
+    :param es:
+    :param index:
+    :param docType:
+    :param name:
+    :param query:
+    :param numberOfDocs:
+    :return:
+    """
+    checkIndexAndType(es, index=index, docType=docType)
 
     created = datetime.now(tz.tzlocal())
 
-    if numberOfDocs is None:
-        numberOfDocs = float('inf')
     count = 0
-    for doc in scan(client=es, index=originIndex, doc_type=originType, query=query):
+    for doc in scan(client=es, query=query):
         annDoc = {
             "name": name,
             "created": created,
@@ -91,7 +100,7 @@ def create_annotation_task(es, originIndex, originType, targetIndex, targetType,
             "doc": doc["_source"]
         }
 
-        es.index(index=targetIndex, doc_type=targetType, body=annDoc)
+        es.index(index=index, doc_type=docType, body=annDoc)
 
         count += 1
 
@@ -100,19 +109,34 @@ def create_annotation_task(es, originIndex, originType, targetIndex, targetType,
 
 
 if __name__ == "__main__":
-    create_annotation_task(Elasticsearch(['http://localhost:9200']), originIndex="ctrls", originType="twitter",
-                           targetIndex="ctrls_annotation", targetType="annotation_relevance", name="supernatural",
-                           query={
-                               "query": {
-                                   "bool": {
-                                       "filter": [
-                                           {
-                                               "term": {
-                                                   "start": "2017-02-20T16:33:25.093458-04:00"
-                                               }
-                                           }
-                                       ]
-                                   }
-                               }
-                           },
-                           numberOfDocs=10)
+    es = Elasticsearch(['http://localhost:9200'])
+
+    checkIndexAndType(es, index="test_annotation_index", docType="test_annotation")
+
+    created = datetime.now(tz.tzlocal())
+    for i in xrange(100):
+        annDoc = {
+            "name": "teste",
+            "created": created,
+            "docId": i,
+            "doc": "Doc %d" % i
+        }
+        es.index(index="test_annotation_index", doc_type="test_annotation", body=annDoc)
+
+    # create_annotation_task(es, index="ctrls_annotation", docType="annotation_relevance", name="supernatural",
+    #                        query={
+    #                            "index": "ctrls",
+    #                            "type": "twitter",
+    #                            "query": {
+    #                                "bool": {
+    #                                    "filter": [
+    #                                        {
+    #                                            "term": {
+    #                                                "start": "2017-02-20T16:33:25.093458-04:00"
+    #                                            }
+    #                                        }
+    #                                    ]
+    #                                }
+    #                            }
+    #                        },
+    #                        numberOfDocs=10)
