@@ -10,8 +10,27 @@ from annotated_item import AnnotatedItem
 
 class AnnotationManager(Thread):
     """
-    The annotation manager is responsible to keep a list of available tweets to be annotated. It also manages
-    which tweet is associated to each user of the system, and saves the given annotations to ES.
+    The annotation manager is responsible to retrieve items to be annotated to coming annotators. It takes care
+    of how many annotations were attached to each item and which item is held by each annotator. In order to manage all
+    this, this class employs two lists of items: unannotated items and partially annotated items. The list of
+    unannotated items store available items which have not been annotated by any annotators. Any of these items can
+    be returned to an annotator that has no partially annotated item available.
+
+    The list of partially labeled items store items that have been annotated by some annotator but still lack some
+    annotation(s) in order to fulfill the required number of annotations for each item. Thus, when some annotator asks
+    for a new item, these items (partially annotated) are the first considered. If there is some item not annotated
+    by the given annotator, then the manager returns such item. Only when the given annotator has already annotated all
+    partially annotated items, the manager will get an unannotated item. This item will then be allocated to the given
+    annotator, removed from the list of unannotated items and added to the list of partially annotated items.
+
+    In fact, since each item (potentially) needs to be annotated by more than one annotator, the manager adds a copy
+    of an unannotated item for each annotation required for this item.
+
+    There other two data structures used by the manager to control which annotator is holding which item. When an
+    annotator gets a item to be annotated, the manager does not know whether the annotator will really annotate the
+    item or will just leave the system, for instance. So, the manager stays on the safe side and considers that the
+    annotator will eventually annotated the given item. The manger then includes an entry in the heldItems dictionary
+    in which the key is the annotator id and the value is the associated item.
 
     The annotation manager object is a singleton within the application, i.e., there is only one object that is
     shared by all requests/users.
@@ -48,18 +67,21 @@ class AnnotationManager(Thread):
         # List of unannotated items retrieved and, thus, available to be annotated by any annotator.
         self.unannotatedItems = []
 
-        # List of items that have been annotated by some annotators but that has not yet been annotated by the required
+        # List of items which have been annotated by some annotator but has not yet been annotated by the required
         # number of annotators (self.numAnnotationsPerItem).
         self.partiallyAnnotatedItems = []
 
-        # These are items sent to annotators (responding to requests) but not yet annotated by them.
+        # This dictionary stores, for each annotator, the item it is holding (the one returned by self.getItem()).
         self.heldItems = {}
 
+        # Number of items already returned within the query for unannotated items since the AnnotationManager started.
+        # This index allows to query only new items and it is needed.
         self.searchFrom = 0
 
+        # Flag to indicate whether the AnnotationManager thread is running or not.
         self.running = False
 
-        # Spawn a new thread.
+        # Spawn the AnnotationManager thread. This thread takes care of filling the list of unannotated items.
         self.start()
 
     def run(self):
@@ -71,7 +93,7 @@ class AnnotationManager(Thread):
         self.running = True
         with self.__condition:
             self.__fillPartiallyAnnotatedItems()
-            
+
             while self.running:
                 lenUn = len(self.unannotatedItems)
                 if lenUn < self.numUnannotatedItems / 2:
