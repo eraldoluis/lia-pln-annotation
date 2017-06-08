@@ -1,6 +1,21 @@
 <!doctype html>
 <title>Mention Classifier Display</title>
+
+<style media="screen" type="text/css">
+
+form {
+    display: inline;
+}
+
+</style>
+
+<FORM ACTION="/login" METHOD="post">
+    <INPUT TYPE="submit" name="submit" value="Logout">
+
+</FORM>
+
 <FORM ACTION="annotate" METHOD="post">
+     Você está logado com o e-mail: {{email}}
 
     <head>
         <meta charset="UTF-8">
@@ -24,14 +39,13 @@
         {% if tweet %}
             <h2>O tweet abaixo diz respeito {{context}}?</h2>
 
-            <div id="tweet">{{tweet|safe}}</div>
+    <INPUT TYPE="submit" name="submit" value="Sim">
+    <INPUT TYPE="submit" name="submit" value="Nao">
+    <INPUT TYPE="submit" name="submit" value="Nao Sei">
+    <INPUT TYPE="hidden" name="userId" value="{{userId}}">
+    <INPUT TYPE="hidden" name="tweetId" value="{{tweetId}}">
 
-            <INPUT TYPE="radio" NAME="answer" value="yes">Sim<BR><BR>
-            <INPUT TYPE="radio" NAME="answer" value="no">Não<BR><BR>
-            <INPUT TYPE="hidden" name="userId" value="{{userId}}">
-            <INPUT TYPE="hidden" name="tweetId" value="{{tweetId}}">
-            <INPUT TYPE="submit" name="submit" value="Enviar resposta ou Pular">
-        {% endif %}
+    <div id="tweet">{{tweet|safe}}</div>
 
     {% endblock %}
 

@@ -7,10 +7,10 @@ from werkzeug.datastructures import CallbackDict
 
 
 class ElasticsearchSession(CallbackDict, SessionMixin):
-    def __init__(self, userId, email=None):
+    def __init__(self, userId,email):
         super(ElasticsearchSession, self).__init__()
         self.userId = userId
-        self.email = email
+        self.userEmail = email
 
 
 class ElasticSearchSessionInterface(SessionInterface):
@@ -18,19 +18,17 @@ class ElasticSearchSessionInterface(SessionInterface):
         self.es = es
 
     def open_session(self, app, request):
+        userEmail = None
         userId = request.cookies.get(app.session_cookie_name)
-        email = None
         if userId is None:
             userId = str(uuid4())
-            self.es.index(index="test", doc_type="anotadores", id=userId, body={})
         else:
-            userInfo = self.es.get(index="test", doc_type="anotadores", id=userId)
             try:
-                email = userInfo['_source']['email']
+                userEmail = self.es.get(index="test", doc_type="anotadores", id=userId)['_source']['email']
             except:
                 pass
 
-        return ElasticsearchSession(userId, email)
+        return ElasticsearchSession(userId,userEmail)
 
     def save_session(self, app, session, response):
         domain = self.get_cookie_domain(app)
