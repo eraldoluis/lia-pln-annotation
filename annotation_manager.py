@@ -62,7 +62,7 @@ class AnnotationManager(Thread):
         self.__condition = Condition()
 
         # Size of the queue of unannotated items. The producer thread will keep this number of items always available.
-        self.numUnannotatedItems = 10
+        self.numUnannotatedItems = 100
 
         # List of unannotated items retrieved and, thus, available to be annotated by any annotator.
         self.unannotatedItems = []
@@ -240,7 +240,8 @@ class AnnotationManager(Thread):
             # Unlink item and annotator.
             del self.heldItems[annotatorId]
 
-            # Include back the skipped item in the list of partially annotated items.
+            # Include back the skipped item in the list of partially annotated items,
+            # so that some other annotator can pick it later.
             self.partiallyAnnotatedItems.append(item)
 
             # Return the next item associated to the given annotator.
@@ -356,7 +357,6 @@ class AnnotationManager(Thread):
         res = self.es.search(index=self.index, doc_type=self.annotationType, body={
             "from": self.searchFrom,
             "size": n,
-            "sort": "docId",
             "query": {
                 "function_score": {
                     "query": {
@@ -386,10 +386,10 @@ class AnnotationManager(Thread):
                             }
                         }
                     },
-                    # "random_score": {
-                    #     "seed": 13
-                    # },
-                    # "boost_mode": "replace"
+                    "random_score": {
+                        "seed": 13
+                    },
+                    "boost_mode": "replace"
                 }
             }
         })

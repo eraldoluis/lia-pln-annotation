@@ -1,4 +1,5 @@
 from datetime import datetime
+from sys import stdout
 
 from dateutil import tz
 from elasticsearch import Elasticsearch
@@ -75,7 +76,7 @@ def checkIndexAndType(es, index, docType):
     return True
 
 
-def create_annotation_task(es, index, docType, name, query, numberOfDocs=float('inf')):
+def create_annotation_task(es, index, docType, name, sourceIndex, sourceType, query, numberOfDocs=float('inf')):
     """
     Create an annotation item for each doc in the given query.
 
@@ -92,7 +93,7 @@ def create_annotation_task(es, index, docType, name, query, numberOfDocs=float('
     created = datetime.now(tz.tzlocal())
 
     count = 0
-    for doc in scan(client=es, query=query):
+    for doc in scan(es, index=sourceIndex, doc_type=sourceType, query=query):
         annDoc = {
             "name": name,
             "created": created,
@@ -104,39 +105,49 @@ def create_annotation_task(es, index, docType, name, query, numberOfDocs=float('
 
         count += 1
 
+        if count % 10000 == 0:
+            stdout.write('.')
+            stdout.flush()
+
         if count >= numberOfDocs:
             break
 
+    stdout.write('\n')
+    print 'Created %d items' % count
 
-if __name__ == "__main__":
+
+def main():
     es = Elasticsearch(['http://localhost:9200'])
 
-    checkIndexAndType(es, index="test_annotation_index", docType="test_annotation")
+    checkIndexAndType(es, index="ctrls_annotation", docType="relevance")
 
-    created = datetime.now(tz.tzlocal())
-    for i in xrange(100):
-        annDoc = {
-            "name": "teste",
-            "created": created,
-            "docId": i,
-            "doc": "Doc %d" % i
-        }
-        es.index(index="test_annotation_index", doc_type="test_annotation", body=annDoc)
+    # created = datetime.now(tz.tzlocal())
+    #
+    # for i in xrange(100):
+    #     annDoc = {
+    #         "name": "teste",
+    #         "created": created,
+    #         "docId": i,
+    #         "doc": "Doc %d" % i
+    #     }
+    #     es.index(index="test_annotation_index", doc_type="test_annotation", body=annDoc)
 
-    # create_annotation_task(es, index="ctrls_annotation", docType="annotation_relevance", name="supernatural",
-    #                        query={
-    #                            "index": "ctrls",
-    #                            "type": "twitter",
-    #                            "query": {
-    #                                "bool": {
-    #                                    "filter": [
-    #                                        {
-    #                                            "term": {
-    #                                                "start": "2017-02-20T16:33:25.093458-04:00"
-    #                                            }
-    #                                        }
-    #                                    ]
-    #                                }
-    #                            }
-    #                        },
-    #                        numberOfDocs=10)
+    create_annotation_task(es, index="ctrls_annotation", docType="relevance", name="supernatural",
+                           sourceIndex="ctrls", sourceType="twitter",
+                           query={
+                               "query": {
+                                   "bool": {
+                                       "filter": [
+                                           {
+                                               "term": {
+                                                   "start": "2017-02-20T16:33:25.093458-04:00"
+                                               }
+                                           }
+                                       ]
+                                   }
+                               }
+                           })
+
+
+if __name__ == "__main__":
+    main()
