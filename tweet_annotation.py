@@ -189,4 +189,4 @@ if __name__ == '__main__':
 
     app.session_interface = ElasticsearchSessionInterface(Elasticsearch(['http://localhost:9200']),
                                                           index='ctrls', docType='annotator')
-    app.run(host='127.0.0.1')
+    app.run(host='0.0.0.0')
