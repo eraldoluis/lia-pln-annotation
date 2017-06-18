@@ -4,7 +4,7 @@ from sys import stdout
 from dateutil import tz
 from elasticsearch import Elasticsearch
 from elasticsearch.client import IndicesClient
-from elasticsearch.helpers import scan
+from elasticsearch.helpers import scan, bulk
 
 
 def checkIndexAndType(es, index, docType):
@@ -40,6 +40,19 @@ def checkIndexAndType(es, index, docType):
                 },
                 "docId": {
                     "type": "keyword"
+                },
+                "context": {
+                    "properties": {
+                        "name": {
+                            "type": "keyword"
+                        },
+                        "terms": {
+                            "type": "keyword"
+                        },
+                        "description": {
+                            "type": "text"
+                        }
+                    }
                 },
                 "numValidAnnotations": {
                     "type": "long"
@@ -84,6 +97,8 @@ def create_annotation_task(es, index, docType, name, sourceIndex, sourceType, qu
     :param index:
     :param docType:
     :param name:
+    :param sourceType:
+    :param sourceIndex:
     :param query:
     :param numberOfDocs:
     :return:
@@ -92,28 +107,43 @@ def create_annotation_task(es, index, docType, name, sourceIndex, sourceType, qu
 
     created = datetime.now(tz.tzlocal())
 
-    count = 0
-    for doc in scan(es, index=sourceIndex, doc_type=sourceType, query=query):
-        annDoc = {
-            "name": name,
-            "created": created,
-            "docId": doc["_id"],
-            "doc": doc["_source"]
-        }
+    def generator():
+        count = 0
+        for doc in scan(es, index=sourceIndex, doc_type=sourceType, query=query):
+            annDoc = {
+                "name": name,
+                "created": created,
+                "docId": doc["_id"],
+                "doc": doc["_source"],
+                "context": {
+                    "name": "supernatural",
+                    # "terms": [u"sam", u"dean"],
+                    "description": u"Série Supernatural"
+                }
+            }
 
-        es.index(index=index, doc_type=docType, body=annDoc)
+            action = {
+                '_op_type': 'index',
+                '_index': index,
+                '_type': docType,
+                '_source': annDoc
+            }
 
-        count += 1
+            yield action
 
-        if count % 10000 == 0:
-            stdout.write('.')
-            stdout.flush()
+            count += 1
 
-        if count >= numberOfDocs:
-            break
+            if count % 10000 == 0:
+                stdout.write('.')
+                stdout.flush()
 
-    stdout.write('\n')
-    print 'Created %d items' % count
+            if count >= numberOfDocs:
+                break
+
+        stdout.write('\n')
+        print 'Created %d items' % count
+
+    bulk(es, generator())
 
 
 def main():
@@ -132,15 +162,15 @@ def main():
     #     }
     #     es.index(index="test_annotation_index", doc_type="test_annotation", body=annDoc)
 
-    create_annotation_task(es, index="ctrls_annotation", docType="relevance", name="supernatural",
-                           sourceIndex="ctrls", sourceType="twitter",
+    create_annotation_task(es, index="ctrls_annotation_no_retweet", docType="relevance", name="supernatural",
+                           sourceIndex="ctrls_no_retweet", sourceType="twitter",
                            query={
                                "query": {
                                    "bool": {
                                        "filter": [
                                            {
                                                "term": {
-                                                   "start": "2017-02-20T16:33:25.093458-04:00"
+                                                   "start": "2017-02-20T16:33:25.093458-04:00"  # SUPERNATURAL
                                                }
                                            }
                                        ]
