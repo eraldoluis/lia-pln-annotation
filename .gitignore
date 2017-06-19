@@ -1,3 +1,4 @@
 .idea
 *.pyc
 app_secret_key
+context_config.json
