@@ -31,8 +31,14 @@ class ElasticsearchSession(CallbackDict, SessionMixin):
     def login(self, email):
         hits = self.es.search(index=self.index, doc_type=self.docType, body={
             "query": {
-                "term": {
-                    "email": email
+                "bool": {
+                    "filter": [
+                        {
+                            "term": {
+                                "email": email
+                            }
+                        }
+                    ]
                 }
             }
         })["hits"]["hits"]
@@ -99,9 +105,6 @@ class ElasticsearchSessionInterface(SessionInterface):
         Check if the given index and type exist. If the doc type or the index do not exist, create them and the
         corresponding mappings.
 
-        :param es: Elasticsearch client.
-        :param index:
-        :param docType:
         :return:
         """
         ic = IndicesClient(self.es)

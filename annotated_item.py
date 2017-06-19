@@ -7,6 +7,9 @@ class AnnotatedItem:
         self.id = id
         self.doc = source["doc"]
         self.docId = source["docId"]
+        self.contextDescription = None
+        if "context" in source:
+            self.contextDescription = source["context"].get("description")
 
         self.numValidAnnotations = source.get("numValidAnnotations", 0)
 

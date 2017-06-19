@@ -4,15 +4,17 @@ import json
 import requests
 from codecs import open
 
-import flask
 from elasticsearch import Elasticsearch
-from flask import Flask, render_template, request, session, redirect, flash, current_app
-from werkzeug.local import LocalProxy
+from flask import Flask, render_template, request, session, redirect, flash, current_app, abort
 
 from annotation_manager import AnnotationManager
 from session_manager import ElasticsearchSessionInterface
 
 app = Flask(__name__)
+
+# Load keys for each context.
+with open('context_config.json') as f:
+    contextConfig = json.load(f)
 
 # Load app secret key from file.
 app.secret_key = None
@@ -20,20 +22,21 @@ with open('app_secret_key', 'rt', encoding='utf8') as f:
     app.secret_key = f.read()
 
 
-def getElasticSearchClient():
+def getElasticsearchClient():
     """
     Elasticsearch client is bounded to the request (flask.g).
     This function returns the bounded client or create a new one.
 
     :return: the Elasticsearch client bounded to this request.
     """
-    _es = getattr(flask.g, 'es', None)
-    if _es is None:
-        _es = flask.g.es = Elasticsearch(['http://localhost:9200'])
-    return _es
+    with app.app_context():
+        _es = getattr(current_app, 'esClient', None)
+        if _es is None:
+            _es = current_app.esClient = Elasticsearch(['http://localhost:9200'])
+        return _es
 
 
-def getAnnotationManager():
+def getAnnotationManager(key):
     """
     The annotation manager object manages which tweets are available for annotation and return one tweet for each
     user that logs in the system. It is also responsible for saving annotations to ES.
@@ -42,67 +45,78 @@ def getAnnotationManager():
     and it is responsible for managing the lists of tweets for all users. Thus, it needs to deal with race conditions,
     caused by the request threads.
 
+    :param key: key to the current context (this should be part of the request URL).
+
     :return: the annotation manager object.
     """
     with app.app_context():
-        _annManager = getattr(current_app, 'annManager', None)
+        _contextConfig = getattr(current_app, 'contextConfig', None)
+        if _contextConfig is None:
+            _contextConfig = current_app.contextConfig = contextConfig
+
+        if key not in _contextConfig:
+            return None
+
+        _context = _contextConfig[key]
+        _annManager = _context.get("annotationManager")
         if _annManager is None:
-            _annManager = current_app.annManager = AnnotationManager(name="supernatural",
-                                                                     esClient=Elasticsearch(['http://localhost:9200']),
-                                                                     index="ctrls_annotation",
-                                                                     annotationType="relevance",
-                                                                     annotationName="supernatural",
-                                                                     numAnnotationsPerItem=2,
-                                                                     logger=app.logger)
+            _annManager = AnnotationManager(name=_context["name"], esClient=getElasticsearchClient(),
+                                            index="ctrls_annotation", annotationType="relevance",
+                                            annotationName=_context["name"], numAnnotationsPerItem=2, logger=app.logger)
+            _context["annotationManager"] = _annManager
+
         return _annManager
 
 
-# Proxy variable to the Elasticsearch client.
-es = LocalProxy(getElasticSearchClient)
+@app.route('/<key>/login', methods=['GET', 'POST'])
+def login(key):
+    if getAnnotationManager(key) is None:
+        abort(404)
 
-# Proxy variable to the annotation manager object.
-annManager = LocalProxy(getAnnotationManager)
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
     if request.method == 'GET':
         if session.userEmail is not None:
             # User is logged already.
-            return redirect('/')
-        return render_template("login_page.html", userID=session.userId)
+            return redirect('/%s' % key)
+        return render_template("login_page.html", userID=session.userId, key=key)
     else:  # request.method == 'POST'
         email = request.form.get('email')
         session.login(email)
-        return redirect('/')
+        return redirect('/%s' % key)
 
 
-@app.route('/logout', methods=['GET', 'POST'])
-def logout():
+@app.route('/<key>/logout', methods=['GET', 'POST'])
+def logout(key):
+    if getAnnotationManager(key) is None:
+        abort(404)
+
     session.logout()
-    return redirect('/')
+    return redirect('/%s' % key)
 
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
+@app.route('/<key>/', methods=['GET', 'POST'])
+def index(key):
     """
     Render the annotation page using the current tweet for the logged user.
     :return:
     """
 
+    annManager = getAnnotationManager(key)
+    if annManager is None:
+        abort(404)
+
     # Checks if the user has an e-mail attached to it
     if session.userEmail is None:
-        return redirect('/login')
+        return redirect('/%s/login' % key)
 
     if request.form.get('submit') == "Logout":
         session.userEmail = None
-        return redirect('/login')
+        return redirect('/%s/login' % key)
 
     # Get current item for the logged user.
     item = annManager.getItem(session.userId)
     if item is None:
         app.logger.error("No item to be annotated!")
-        return render_template('tweet_annotation.html', userId=session.userId, email=session.userEmail,
+        return render_template('tweet_annotation.html', userId=session.userId, email=session.userEmail, key=key,
                                message="Todos os tweets foram anotados. Obrigado!")
 
     tweet = item.doc["tweet"]
@@ -114,7 +128,7 @@ def index():
     if oEmbedResp.status_code != 200:
         # Não retornou com sucesso (por alguma razão que desconheço).
         annManager.invalidate(session.userId, item.id, "Unexpected status code %d" % oEmbedResp.status_code)
-        return redirect('/')
+        return redirect('/%s' % key)
 
     # Load the returned tweet JSON.
     tweetJson = json.loads(oEmbedResp.content)
@@ -122,24 +136,28 @@ def index():
     if 'html' not in tweetJson:
         # A API do Twitter retornou algum erro. Em geral, o tweet foi removido ou não é mais público.
         annManager.invalidate(session.userId, tweet.id, "Tweet nulo!")
-        return redirect('/')
+        return redirect('/%s' % key)
 
     # Get the HTML content.
     tweetHtml = tweetJson['html']
 
     # Render the annotation page.
-    return render_template('tweet_annotation.html', userId=session.userId, tweetId=item.id,
-                           tweet=tweetHtml, context=u"à série Supernatural", email=session.userEmail)
+    return render_template('tweet_annotation.html', userId=session.userId, tweetId=item.id, key=key,
+                           tweet=tweetHtml, context=item.contextDescription, email=session.userEmail)
 
 
-@app.route('/annotate', methods=['GET', 'POST'])
-def annotateTweet():
+@app.route('/<key>/annotate', methods=['GET', 'POST'])
+def annotateTweet(key):
     """
     Process the annotation form request.
     :return:
     """
+    annManager = getAnnotationManager(key)
+    if annManager is None:
+        abort(404)
+
     if request.method == 'GET':
-        return redirect('/')
+        return redirect('/%s' % key)
 
     # Check if the logged user is making the request.
     userId = session.userId
@@ -150,7 +168,7 @@ def annotateTweet():
                                                                                                         'userId'),
                                                                                                     request.form.get(
                                                                                                         'tweetId')))
-        return redirect('/')
+        return redirect('/%s' % key)
 
     # Check if the given tweet annotation is related to the current tweet for the logged user.
     # This can fail when the user refresh a previous submitted form.
@@ -162,7 +180,7 @@ def annotateTweet():
                                                                                               request.form.get(
                                                                                                   'tweetId'),
                                                                                               userId))
-        return redirect('/')
+        return redirect('/%s' % key)
 
     # Get the provided annotation.
     annotation = request.form.get("submit")
@@ -175,18 +193,14 @@ def annotateTweet():
         annManager.skip(userId, item.id)
     else:
         app.logger.error("Unknown annotation %s" % annotation)
-        return redirect("/")
+        return redirect('/%s' % key)
 
     # Move to the next tweet.
     flash('Tweet analisado com sucesso!')
     app.logger.info(u'Usuário %s anotou o item %s como %s' % (userId, item.id, annotation))
-    return redirect('/')
+    return redirect('/%s' % key)
 
 
 if __name__ == '__main__':
-    # Call this method here in order to create the singleton before starting the app.
-    getAnnotationManager()
-
-    app.session_interface = ElasticsearchSessionInterface(Elasticsearch(['http://localhost:9200']),
-                                                          index='ctrls', docType='annotator')
+    app.session_interface = ElasticsearchSessionInterface(getElasticsearchClient(), index='ctrls', docType='annotator')
     app.run(host='0.0.0.0')

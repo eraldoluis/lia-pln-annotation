@@ -9,11 +9,11 @@ form {
 
 </style>
 
-<FORM ACTION="/logout" METHOD="post">
+<FORM ACTION="/{{key}}/logout" METHOD="post">
     <INPUT TYPE="submit" name="submit" value="Logout">
 </FORM>
 
-<FORM ACTION="annotate" METHOD="post">
+<FORM ACTION="/{{key}}/annotate" METHOD="post">
      Você está logado com o e-mail: {{email}}
 
     <head>
@@ -36,7 +36,7 @@ form {
         {% endif %}
 
         {% if tweet %}
-            <h2>O tweet abaixo diz respeito {{context}}?</h2>
+            <h2>O tweet abaixo está relacionado ao tema <span style="color:red">{{context}}</span></h2>
 
             <INPUT TYPE="submit" name="submit" value="Sim">
             <INPUT TYPE="submit" name="submit" value="Nao">
