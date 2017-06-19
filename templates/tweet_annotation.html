@@ -1,5 +1,5 @@
 <!doctype html>
-<title>Mention Classifier Display</title>
+<title>LIA/PLN: Classificador de Tweets ({{context}})</title>
 
 <style media="screen" type="text/css">
 
@@ -36,7 +36,9 @@ form {
         {% endif %}
 
         {% if tweet %}
-            <h2>O tweet abaixo está relacionado ao tema <span style="color:red">{{context}}</span></h2>
+            <h2>O tweet abaixo está relacionado ao tema abaixo?</h2>
+
+            <h1 style="color:red">{{context}}</h1>
 
             <INPUT TYPE="submit" name="submit" value="Sim">
             <INPUT TYPE="submit" name="submit" value="Nao">

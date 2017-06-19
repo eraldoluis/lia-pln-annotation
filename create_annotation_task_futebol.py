@@ -177,7 +177,10 @@ def create_annotation_task(es, index, docType, name, sourceIndex, sourceType, qu
 def main():
     es = Elasticsearch(['http://localhost:9200'])
 
-    checkIndexAndType(es, index="ctrls_annotation", docType="relevance")
+    targetIndex = "ctrls_annotation_no_retweet"
+    targetType = "relevance"
+
+    checkIndexAndType(es, index=targetIndex, docType=targetType)
 
     # created = datetime.now(tz.tzlocal())
     #
@@ -207,7 +210,7 @@ def main():
     #                        },
     #                        numberOfDocs=20)
 
-    create_annotation_task(es, index="ctrls_annotation_no_retweet", docType="relevance", name="futebol",
+    create_annotation_task(es, index=targetIndex, docType=targetType, name="futebol",
                            sourceIndex="ctrls_no_retweet", sourceType="twitter",
                            query={
                                "query": {

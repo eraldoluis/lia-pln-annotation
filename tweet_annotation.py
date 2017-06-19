@@ -61,7 +61,7 @@ def getAnnotationManager(key):
         _annManager = _context.get("annotationManager")
         if _annManager is None:
             _annManager = AnnotationManager(name=_context["name"], esClient=getElasticsearchClient(),
-                                            index="ctrls_annotation", annotationType="relevance",
+                                            index="ctrls_annotation_no_retweet", annotationType="relevance",
                                             annotationName=_context["name"], numAnnotationsPerItem=2, logger=app.logger)
             _context["annotationManager"] = _annManager
 
